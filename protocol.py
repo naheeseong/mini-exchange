@@ -36,10 +36,17 @@ UDP_BUFFER_SIZE = 4096
 TCP_HOST = "127.0.0.1"
 TCP_PORT = 6000
 
+# 서버가 동시에 '접속 대기열'에 쌓아둘 수 있는 연결 수 (listen 의 backlog)
+TCP_BACKLOG = 16
+TCP_BUFFER_SIZE = 4096
+
 # ---------------------------------------------------------------------------
 # 3) 거래소 설정
 # ---------------------------------------------------------------------------
 # 가상 종목과 시작 가격(원)
+# 트레이더가 처음 접속하면 받는 가상 현금(원)
+INITIAL_CASH = 10_000_000
+
 INITIAL_PRICES = {
     "SJU": 50000,
     "KBK": 72000,
@@ -68,6 +75,53 @@ def decode(data: bytes) -> dict:
     return json.loads(data.decode("utf-8"))
 
 
+# ---------------------------------------------------------------------------
+# 5) TCP 메시지 경계 처리 (줄바꿈 구분)
+# ---------------------------------------------------------------------------
+# UDP 는 "데이터그램" 단위라서 sendto 한 번 = recvfrom 한 번으로 메시지 경계가 그대로 지켜진다.
+# TCP 는 "바이트 스트림"이다. 수도관처럼 바이트가 순서대로 흘러갈 뿐, 메시지의 시작/끝 표시가 없다.
+#   - 상대가 send 를 두 번 해도 내 recv 한 번에 두 메시지가 붙어서 올 수 있고
+#   - 큰 메시지 하나가 recv 두 번에 나뉘어 올 수도 있다.
+# 그래서 "메시지 끝에 \n 을 붙이고, 받는 쪽은 \n 이 나올 때까지 모아서 자른다"는 약속을 정한다.
+# JSON 은 문자열 안의 줄바꿈을 "\\n" 두 글자로 바꿔 쓰므로, 진짜 줄바꿈 바이트는 메시지 끝에만 나온다.
+
+def encode_line(message: dict) -> bytes:
+    """TCP 로 보낼 메시지: JSON 바이트 + 줄바꿈(메시지 끝 표시)"""
+    return encode(message) + b"\n"
+
+
+def send_message(sock, message: dict):
+    """TCP 소켓으로 메시지 하나를 보낸다.
+
+    send() 는 OS 버퍼 사정에 따라 '일부만' 보내고 돌아올 수 있다.
+    sendall() 은 전부 보낼 때까지 send 를 반복해 주므로 메시지가 중간에 잘리지 않는다.
+    """
+    sock.sendall(encode_line(message))
+
+
+class LineReader:
+    """TCP 스트림에서 '\n 으로 끝나는 메시지'를 하나씩 꺼내주는 도우미.
+
+    받은 바이트를 buffer 에 계속 모아두다가, \n 이 보이면 그 앞까지를 메시지 하나로 자른다.
+    \n 뒤에 남은 바이트(다음 메시지의 앞부분)는 버리지 않고 buffer 에 남겨둔다.
+    """
+
+    def __init__(self, sock):
+        self.sock = sock
+        self.buffer = b""
+
+    def read_message(self):
+        """메시지 하나(dict)를 돌려준다. 상대가 연결을 끊었으면 None."""
+        while b"\n" not in self.buffer:
+            data = self.sock.recv(TCP_BUFFER_SIZE)
+            if not data:
+                # recv 가 빈 바이트를 돌려주면 상대가 연결을 닫았다는 뜻(FIN 수신)
+                return None
+            self.buffer += data
+        line, self.buffer = self.buffer.split(b"\n", 1)
+        return decode(line)
+
+
 def now_ms() -> float:
     """현재 시각을 밀리초(ms) 단위로 돌려준다. 지연(latency) 계산에 쓴다.
 
@@ -87,3 +141,17 @@ def now_ms() -> float:
 #   - seq : 1부터 1씩 늘어나는 일련번호. UDP 는 손실/순서를 알려주지 않으므로
 #           우리가 직접 번호를 붙여서 "빠진 번호 = 손실", "작은 번호가 늦게 옴 = 순서 뒤바뀜"을 알아낸다.
 #   - ts  : 서버가 보낸 시각(ms). 받은 시각 - ts = 네트워크 지연.
+#
+# [TCP 주문/체결] 클라이언트 ↔ 서버 (한 줄에 메시지 하나, 끝에 \n)
+#   클라이언트 → 서버
+#     {"type": "HELLO", "name": "alice"}                        접속 직후 내 이름 알리기
+#     {"type": "ORDER", "order_id": 1, "side": "BUY", "symbol": "SJU", "qty": 10}
+#     {"type": "BALANCE"}                                       잔고 조회
+#     {"type": "STATUS"}                                        거래소 현황 조회 (대시보드용)
+#   서버 → 클라이언트
+#     {"type": "WELCOME", "cash": ..., "holdings": {...}}
+#     {"type": "FILL", "order_id": 1, "side": "BUY", "symbol": "SJU", "qty": 10,
+#      "price": 50120, "cash": ..., "holdings": {...}}          체결 완료
+#     {"type": "REJECT", "order_id": 1, "reason": "잔고 부족"}   주문 거부
+#     {"type": "BALANCE", "cash": ..., "holdings": {...}}
+#     {"type": "STATUS", "fills": [최근 체결...], "stats": {...}, "accounts": {...}}

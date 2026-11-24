@@ -1,0 +1,3 @@
+WELCOME: 10000000
+붙여보내기: 1 2
+쪼개보내기: {'type': 'FILL', 'order_id': 3, 'side': 'SELL', 'symbol': 'SJU', 'qty': 1, 'price': 50620, 'cash': 9927620, 'holdings': {'KBK': 1}}

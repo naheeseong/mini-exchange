@@ -1,0 +1,15 @@
+[alice] 224.1.1.1:5007 그룹 가입 완료, 시세 수신 시작 (drop=0.0, reorder=0.0)
+[alice] TCP 접속 완료 127.0.0.1:48048 → 127.0.0.1:6000  (현금 10,000,000원 | 보유 없음)
+[alice] 명령: buy SJU 10 / sell KBK 5 / balance / price / stats / quit
+[alice] FILL #1 BUY SJU 10주 @ 50,390원 (내가 본 시세 50,390) RTT 0.76ms | 현금 9,496,100원 | 보유 SJU 10주
+[alice] FILL #2 BUY KBK 5주 @ 72,410원 (내가 본 시세 72,410) RTT 0.18ms | 현금 9,134,050원 | 보유 SJU 10주, KBK 5주
+[alice] FILL #3 SELL SJU 4주 @ 50,630원 (내가 본 시세 50,630) RTT 0.45ms | 현금 9,336,570원 | 보유 SJU 6주, KBK 5주
+[alice] REJECT #4 보유 주식 부족 (NET 0주 보유) RTT 0.17ms
+[alice] REJECT #5 현금 부족 (필요 72,220,000원, 보유 9,336,570원) RTT 0.30ms
+[alice] 잔고 현금 9,336,570원 | 보유 SJU 6주, KBK 5주
+[alice] UDP 시세 : 수신 30/30  손실 0개(0.0%)  역순 0개  지연 평균 0.26ms / 최대 0.34ms
+[alice] TCP 주문 : 주문 5건 (체결 3, 거부 2, 손실 0)  RTT 평균 0.37ms / 최소 0.17ms / 최대 0.76ms
+
+[alice] === 최종 결과 ===
+[alice] UDP 시세 : 수신 30/30  손실 0개(0.0%)  역순 0개  지연 평균 0.26ms / 최대 0.34ms
+[alice] TCP 주문 : 주문 5건 (체결 3, 거부 2, 손실 0)  RTT 평균 0.37ms / 최소 0.17ms / 최대 0.76ms
