@@ -1,2 +1,2 @@
 # 3단계 대시보드에서 사용 (소켓 통신은 표준 라이브러리만 사용)
-streamlit>=1.30
+streamlit>=1.37   # st.fragment(run_every=...) 로 1초마다 화면 갱신
