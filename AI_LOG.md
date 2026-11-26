@@ -1,138 +1,143 @@
-# AI_LOG.md — Agentic AI 활용 기록
+# AI_LOG.md — Record of Using Agentic AI
 
-이 프로젝트는 Claude(AI 에이전트)와 함께 단계별로 개발했다.
-각 단계마다 날짜, 내 요청, AI가 한 일, 내가 결정한 것을 기록한다.
+**English** | [한국어](AI_LOG.ko.md)
 
----
-
-## 0단계 — 요구사항 정리 (2026-11-24)
-
-**내 요청**
-- 과제 요구사항(TCP/UDP 사용, 실제 동작 시연, AI 활용 기록, 코드 복사 금지)과 설계(UDP 멀티캐스트 시세 + TCP 주문/체결), 파일 구성, 코딩 규칙을 전달.
-- 먼저 CLAUDE.md에 정리하고, (1) UDP 시세 → (2) TCP 주문/체결 → (3) 대시보드 → (4) README 순서로 진행. 단계마다 테스트하고 확인받기.
-
-**AI가 한 일**
-- `CLAUDE.md`에 요구사항·설계·코딩 규칙·작업 방식을 정리.
-
-**내가 결정한 것**
-- 시세는 UDP 멀티캐스트(224.1.1.1:5007), 주문은 TCP(127.0.0.1:6000).
-- 종목 3개(SJU 50,000 / KBK 72,000 / NET 13,500), 0.1초 랜덤 워크.
-- 소켓은 표준 `socket`만, 주석은 한국어, 읽기 쉬운 코드 우선.
+This project was developed step by step together with Claude (an AI agent).
+For each step I record the date, my request, what the AI did, and what I decided.
 
 ---
 
-## 1단계 — UDP 멀티캐스트 시세 (2026-11-24)
+## Step 0 — Organizing the Requirements (2026-11-24)
 
-**내 요청**
-- UDP 시세 기능 구현: seq/ts 부착, 클라이언트에서 손실률·지연·순서 뒤바뀜 계산, `--drop` 옵션.
+**My request**
+- Gave the AI the assignment requirements (use TCP/UDP, demonstrate real behavior, record AI usage, no copying code), the design (UDP multicast quotes + TCP orders/fills), the file layout, and the coding rules.
+- Asked it to first organize these in CLAUDE.md, then proceed in the order (1) UDP market data → (2) TCP orders/fills → (3) dashboard → (4) README, testing each step and getting my confirmation.
 
-**AI가 한 일**
-- `protocol.py`: 주소/포트, 종목, 틱 간격 등 공통 설정 + JSON `encode`/`decode` + `now_ms()`.
-- `exchange_server.py`: 랜덤 워크 가격 생성(평균 0, 표준편차 0.2%, 10원 단위) + 0.1초마다 멀티캐스트 송신 스레드. 가격 dict는 2단계 TCP 스레드와 공유할 예정이라 Lock으로 보호.
-- `trader_client.py`: 멀티캐스트 그룹 가입(IGMP Join) 후 수신, `QuoteStats` 클래스로 손실/역순/지연 계산.
-  - 손실 = (첫 seq ~ 최대 seq 개수) − 받은 개수. 중간에 접속한 클라이언트가 이전 번호를 손실로 세지 않도록 "처음 받은 seq"부터 셈.
-  - 역순 = 이미 받은 최대 seq보다 작은 seq가 도착한 경우.
-  - 지연 = 받은 시각 − ts.
-- Windows/Mac 호환 처리:
-  - 수신 소켓은 멀티캐스트 주소가 아닌 `""`로 bind (Windows는 멀티캐스트 주소 bind 불가).
-  - `SO_REUSEADDR` + (있으면) `SO_REUSEPORT` → 한 컴퓨터에서 여러 클라이언트가 같은 포트 사용 (Mac은 REUSEPORT 필요, Windows엔 없음).
-  - `IP_MULTICAST_LOOP=1` → 같은 컴퓨터의 수신자도 받음.
-  - `settimeout(1.0)` → Windows에서 Ctrl+C로 종료 가능.
-  - `--iface` 옵션 → 와이파이가 꺼진 Mac 등에서 `127.0.0.1`로 지정 가능.
-- 테스트: 서버 1개 + 클라이언트 3개(alice 기본 / bob `--drop 0.1` / carol `--reorder 0.05`)를 10초 실행. 로그는 `test_logs/step1_*.log`.
+**What the AI did**
+- Organized the requirements, design, coding rules, and workflow in `CLAUDE.md`.
 
-**테스트 결과 (10초, 약 100패킷)**
-| 클라이언트 | 옵션 | 수신 | 손실률 | 역순 | 평균 지연 |
+**What I decided**
+- Quotes over UDP multicast (224.1.1.1:5007), orders over TCP (127.0.0.1:6000).
+- Three stocks (SJU 50,000 / KBK 72,000 / NET 13,500), random walk every 0.1 s.
+- Standard `socket` module only, comments in Korean, readable code first.
+
+---
+
+## Step 1 — UDP Multicast Market Data (2026-11-24)
+
+**My request**
+- Implement the UDP market-data feature: attach seq/ts, compute loss rate, latency, and reordering on the client, and add a `--drop` option.
+
+**What the AI did**
+- `protocol.py`: shared settings such as addresses/ports, symbols, and tick interval + JSON `encode`/`decode` + `now_ms()`.
+- `exchange_server.py`: random-walk price generation (mean 0, standard deviation 0.2%, in 10 KRW steps) + a thread that sends a multicast message every 0.1 s. The price dict will be shared with the TCP threads in step 2, so it is protected by a Lock.
+- `trader_client.py`: joins the multicast group (IGMP Join) and receives quotes; the `QuoteStats` class computes loss, reordering, and latency.
+  - Loss = (number of seqs from the first seq to the highest seq) − number received. Counting starts from the "first seq received" so that a client that joins midway does not count earlier numbers as lost.
+  - Reordering = a seq arrives that is smaller than the highest seq already received.
+  - Latency = receive time − ts.
+- Windows/Mac compatibility:
+  - The receiving socket binds to `""` instead of the multicast address (Windows cannot bind to a multicast address).
+  - `SO_REUSEADDR` + `SO_REUSEPORT` (where available) → several clients on one machine can use the same port (Mac needs REUSEPORT; Windows does not have it).
+  - `IP_MULTICAST_LOOP=1` → receivers on the same machine also get the packets.
+  - `settimeout(1.0)` → Ctrl+C can terminate the program on Windows.
+  - `--iface` option → can be set to `127.0.0.1`, e.g. on a Mac with Wi-Fi turned off.
+- Test: ran 1 server + 3 clients (alice default / bob `--drop 0.1` / carol `--reorder 0.05`) for 10 seconds. Logs are in `test_logs/step1_*.log`.
+
+**Test results (10 s, about 100 packets)**
+| Client | Option | Received | Loss rate | Out of order | Avg. latency |
 |---|---|---|---|---|---|
-| alice | 없음 | 101/101 | 0.0% | 0 | 0.34ms |
+| alice | none | 101/101 | 0.0% | 0 | 0.34ms |
 | bob | `--drop 0.1` | 85/100 | 15.0% | 0 | 0.31ms |
-| carol | `--reorder 0.05` | 101/101 | 0.0% | 3 | 3.27ms (붙잡아 둔 패킷이 ~100ms 늦어져 평균 상승) |
+| carol | `--reorder 0.05` | 101/101 | 0.0% | 3 | 3.27ms (held-back packets arrive ~100 ms late, raising the average) |
 
-- 같은 서버 패킷을 세 클라이언트가 동시에 받음 → 서버는 한 번만 보내도 1:N 전달됨을 확인.
-- `--iface 127.0.0.1`로도 정상 동작 확인.
+- All three clients received the same server packets at once → confirmed that a single send from the server is delivered 1:N.
+- Also confirmed correct operation with `--iface 127.0.0.1`.
 
-**AI가 추가로 제안한 것**
-- 같은 컴퓨터 안에서는 순서 뒤바뀜이 거의 안 일어나서 역순 감지 기능을 시연할 수 없으므로, `--drop`과 같은 방식의 `--reorder` 옵션을 추가함 (요구사항에 없던 기능 → 확인 필요).
-- 테스트 자동화를 위해 `--duration`(자동 종료), `--quiet`(이벤트 출력 끄기) 옵션 추가.
+**What the AI additionally proposed**
+- On a single machine packets are almost never reordered, so the reordering-detection feature could not be demonstrated. The AI therefore added a `--reorder` option that works like `--drop` (a feature not in the requirements → needed my confirmation).
+- Added `--duration` (auto exit) and `--quiet` (turn off event output) options to automate testing.
 
-**내가 결정한 것**
-- `--reorder` 옵션 유지 여부는 AI에게 판단을 맡김 → AI는 역순 감지 시연에 필요하므로 유지하되, 코드 주석과 README에 "선택 옵션(시연용)"으로 명시하기로 함.
-- 코드는 내 GitHub 저장소에 올리기로 함.
-
----
-
-## 2단계 — TCP 주문/체결 (2026-11-24)
-
-**내 요청**
-- 1단계 확인 후 "진행". TCP 주문/체결 구현: 멀티스레드 서버, `\n` 메시지 구분, `buy SJU 10` → FILL, RTT 측정, 트레이더별 잔고/보유 주식.
-- 진행 도중 "끝까지 다 하고 완성되면 말해줘" → 2~4단계는 단계마다 멈추지 않고 이어서 진행하기로 함.
-
-**AI가 한 일**
-- `protocol.py`: `encode_line`, `send_message`(`sendall` 사용), `LineReader`(받은 바이트를 모아 `\n` 마다 자름). TCP 메시지 형식(HELLO/WELCOME/ORDER/FILL/REJECT/BALANCE/STATUS) 정리.
-- `exchange_server.py`: 메인 스레드는 `accept()`, 트레이더마다 스레드 하나(`handle_trader`). 체결은 현재 시세로 즉시, 잔고 확인과 반영은 한 Lock 안에서 처리(두 스레드가 같은 돈을 쓰는 문제 방지). 현금/보유 부족이면 REJECT.
-- `trader_client.py`: UDP 수신을 백그라운드 스레드로 옮기고, 메인 스레드는 키보드 입력 → TCP 주문 → 응답 대기. `perf_counter` 로 RTT 측정. FILL 에 "내가 UDP 로 본 시세"를 같이 출력해서 시세와 체결가 차이를 볼 수 있게 함. 1단계 동작은 `--watch` 모드로 유지.
-- `tests/test_message_boundary.py`: 두 메시지를 한 번에 붙여 보내기, 한 메시지를 1바이트씩 쪼개 보내기 → 서버가 정확히 나눠 처리하는지 실험.
-
-**테스트 (서버 1 + 거래 클라이언트 3 + 관찰 클라이언트 1 + 경계 실험)** — 로그: `test_logs/step2_*.log`
-- alice: 체결 3, 거부 2(보유 부족, 현금 부족), RTT 평균 0.41ms
-- bob(`--drop 0.1`): UDP 손실 13.3%인데 TCP 주문 3건 모두 체결 → UDP 손실과 TCP 신뢰성 대비 확인
-- carol: 매수/매도 60건 연속, 60건 모두 체결, RTT 평균 0.09ms
-- dave(`--watch`): 1단계처럼 시세만 출력, 손실 0%
-- 경계 실험: 붙여 보내기 → 응답 2개(주문번호 1, 2), 쪼개 보내기 → FILL 1개 정상
-- 서버를 먼저 끄면 클라이언트가 다음 주문 때 "서버 연결이 끊겼습니다"를 바로 출력함을 확인
-
-**테스트 중 발견해서 고친 것**
-- 서버 로그에 두 체결 메시지가 한 줄에 붙어서 찍힌 것을 발견 (`[체결] bob ...[체결] carol ...`).
-  원인: 여러 스레드가 동시에 `print` 하면 '내용'과 '줄바꿈'이 따로 써져서 섞임. → `print_lock` 을 둔 `log()` 함수로 수정 후 재테스트에서 해결.
-
-**내가 결정한 것**
-- 2단계 진행 승인, 이후 단계는 중간 확인 없이 끝까지 진행하도록 위임.
+**What I decided**
+- Left it to the AI whether to keep the `--reorder` option → the AI decided to keep it because it is needed to demonstrate reordering detection, and to mark it as an "optional option (for demonstration)" in the code comments and README.
+- Decided to upload the code to my GitHub repository.
 
 ---
 
-## 3단계 — Streamlit 대시보드 (2026-11-24)
+## Step 2 — TCP Orders / Fills (2026-11-24)
 
-**AI가 한 일**
-- `dashboard.py`: 대시보드 자신이 하나의 트레이더처럼 동작하도록 설계.
-  - UDP: 멀티캐스트에 직접 가입해 시세 수신 → 종목별 가격 차트, 손실률(누적/최근 10초), 편도 지연 차트.
-  - TCP: 1초마다 거래소에 `STATUS` 요청 → 최근 체결 내역(전체 트레이더), 트레이더 잔고. 요청마다 RTT 를 기록해서 RTT 차트.
-  - 사이드바: UDP 손실 시뮬레이션 슬라이더(`--drop` 과 같은 기능), 매수/매도 버튼(TCP 주문).
-  - UDP vs TCP 비교 표(연결, 전달 보장, 순서, 메시지 경계, 대상, 측정 손실/지연)를 실시간 숫자와 함께 표시.
-  - `@st.cache_resource` 로 소켓/스레드를 한 번만 만들고, `@st.fragment(run_every=1.0)` 로 1초마다 갱신.
-- 서버에 `STATUS` 메시지와 최근 체결 50건 보관(`recent_fills`) 추가.
+**My request**
+- After checking step 1, said "go ahead". Implement TCP orders/fills: multithreaded server, `\n` message delimiting, `buy SJU 10` → FILL, RTT measurement, per-trader cash and holdings.
+- Midway I said "finish everything and tell me when it's done" → steps 2–4 continued without stopping at each step.
 
-**테스트 (서버 1 + 트레이더 2 + 대시보드, 브라우저 자동화로 확인)** — 스크린샷: `docs/dashboard.png`, 로그: `test_logs/step3_*.log`
-- 대시보드에서 매수 버튼 → FILL, RTT 2.08ms 표시. 체결 내역에 alice/bob/dashboard 체결이 함께 보임.
-- 슬라이더 0.2 → UDP 누적 손실률 10.3%, 최근 10초 손실률 16.0%. 같은 시간 TCP 요청 22건 손실 0, RTT 평균 0.74ms.
-- 트레이더 최종: alice UDP 558/558, 주문 80건 전부 체결 / bob(`--drop 0.1`) UDP 손실 8.5%, 주문 40건 전부 체결.
+**What the AI did**
+- `protocol.py`: `encode_line`, `send_message` (uses `sendall`), `LineReader` (accumulates received bytes and splits at every `\n`). Defined the TCP message types (HELLO/WELCOME/ORDER/FILL/REJECT/BALANCE/STATUS).
+- `exchange_server.py`: the main thread runs `accept()`, with one thread per trader (`handle_trader`). Orders are filled immediately at the current price; checking and updating the balance happen inside a single Lock (prevents two threads from spending the same money). REJECT if cash or holdings are insufficient.
+- `trader_client.py`: moved UDP reception to a background thread; the main thread handles keyboard input → TCP order → waits for the reply. RTT is measured with `perf_counter`. The FILL output also shows "the price I saw over UDP" so the difference between the quote and the fill price is visible. The step 1 behavior is kept as `--watch` mode.
+- `tests/test_message_boundary.py`: sends two messages coalesced in one write, and one message split into single bytes → experiment to check whether the server splits them correctly.
 
-**테스트 중 발견해서 고친 것**
-- 가격 차트 y축이 0부터 시작해서 그래프가 평평하게 보임 → Altair 로 y축을 데이터 범위에 맞춤.
-- 지표 아래 화살표(↑)가 "손실 0개" 같은 설명에도 붙어 오해 소지 → 설명은 캡션으로 옮김.
+**Test (1 server + 3 trading clients + 1 watching client + boundary experiment)** — logs: `test_logs/step2_*.log`
+- alice: 3 fills, 2 rejects (insufficient holdings, insufficient cash), average RTT 0.41ms
+- bob (`--drop 0.1`): 13.3% UDP loss, yet all 3 TCP orders filled → confirmed the contrast between UDP loss and TCP reliability
+- carol: 60 consecutive buy/sell orders, all 60 filled, average RTT 0.09ms
+- dave (`--watch`): prints only quotes as in step 1, 0% loss
+- Boundary experiment: coalesced send → 2 replies (order numbers 1, 2); split send → 1 FILL, correct
+- Confirmed that if the server is stopped first, the client immediately prints "서버 연결이 끊겼습니다" (connection to the server was lost) on the next order
 
-**AI가 판단한 것 (참고)**
-- 대시보드의 UDP 지연 그래프에 50~100ms 튀는 값이 보임. 네트워크가 아니라 Streamlit 이 화면을 그리는 동안 Python GIL 때문에 수신 스레드가 잠깐 멈추는 처리 지연. 터미널 트레이더는 같은 시간 평균 0.3ms 로 안정적이어서 그대로 두고 README 에 설명함.
+**Found and fixed during testing**
+- Noticed two fill messages printed on one line in the server log (`[체결] bob ...[체결] carol ...`).
+  Cause: when several threads `print` at the same time, the 'content' and the 'newline' are written separately and get interleaved. → Fixed with a `log()` function that uses a `print_lock`; resolved in the re-test.
 
----
-
-## 4단계 — README (2026-11-24)
-
-**AI가 한 일**
-- `README.md`: 구조도, 파일 설명, 실행 방법, 명령어/옵션(`--reorder` 는 "선택, 시연용"으로 표시), 시연 시나리오, TCP vs UDP 비교, 멀티캐스트 원리, Windows/Mac 호환 처리, 문제 해결, 테스트 결과 요약.
-- `requirements.txt`: `streamlit>=1.37` (`st.fragment(run_every=...)` 때문에).
-
-**아직 확인 못 한 것**
-- 개발/테스트는 Linux 에서 했다. Windows/Mac 호환 옵션은 코드에 넣었지만 실제 Windows/Mac 에서 직접 돌려보는 것은 내가 해야 함.
+**What I decided**
+- Approved step 2, and delegated the remaining steps to be finished without intermediate confirmation.
 
 ---
 
-## 추가 — README 영어 번역 (2026-11-26)
+## Step 3 — Streamlit Dashboard (2026-11-24)
 
-**사용자 요청**: 담당 교수님이 외국인이라 README 를 영어로.
+**What the AI did**
+- `dashboard.py`: designed so that the dashboard itself behaves like a trader.
+  - UDP: joins the multicast group directly and receives quotes → per-stock price charts, loss rate (cumulative / last 10 s), one-way latency chart.
+  - TCP: sends a `STATUS` request to the exchange every second → recent fills (all traders), trader balances. Records the RTT of every request for an RTT chart.
+  - Sidebar: UDP loss simulation slider (same function as `--drop`), buy/sell buttons (TCP orders).
+  - Shows a UDP vs TCP comparison table (connection, delivery guarantee, ordering, message boundaries, recipients, measured loss/latency) with live numbers.
+  - `@st.cache_resource` creates the sockets/threads only once, and `@st.fragment(run_every=1.0)` refreshes every second.
+- Added a `STATUS` message to the server and storage of the 50 most recent fills (`recent_fills`).
 
-**사용자가 결정한 것**: `README.md` 는 영어로, 기존 한국어 내용은 `README.ko.md` 로 보존하고 두 파일 맨 위에 서로 링크.
+**Test (1 server + 2 traders + dashboard, checked with browser automation)** — screenshot: `docs/dashboard.png`, logs: `test_logs/step3_*.log`
+- Buy button on the dashboard → FILL, RTT 2.08ms displayed. Fills from alice/bob/dashboard appear together in the fill history.
+- Slider at 0.2 → cumulative UDP loss rate 10.3%, last-10-s loss rate 16.0%. Over the same period, 22 TCP requests with 0 lost, average RTT 0.74ms.
+- Final trader results: alice UDP 558/558, all 80 orders filled / bob (`--drop 0.1`) UDP loss 8.5%, all 40 orders filled.
 
-**AI가 한 일**
-- `README.md` 를 영어로 번역 (구조도, 표, 실행 방법, 시연 시나리오, TCP vs UDP 비교, 문제 해결, 테스트 결과 전부). 코드 블록·명령어·`docs/dashboard.png` 경로는 그대로 유지.
-- 예시 출력은 프로그램이 실제로 찍는 한국어 그대로 두고, 그 위에 주요 단어(주, 원, 손실, 체결 등)의 영어 뜻을 달았다.
-- `AI_LOG.md`, `CLAUDE.md`, 코드 주석은 한국어 그대로 둠 (README 의 파일 표에 "in Korean" 이라고 표시).
+**Found and fixed during testing**
+- The price chart's y-axis started at 0, making the graph look flat → used Altair to fit the y-axis to the data range.
+- The arrow (↑) under metrics was also attached to descriptions such as "0 lost", which could be misleading → moved the descriptions to captions.
+
+**What the AI judged (for reference)**
+- The dashboard's UDP latency chart shows occasional 50–100 ms spikes. This is not the network but a processing delay: the receiver thread pauses briefly due to Python's GIL while Streamlit renders the page. Terminal traders were stable at an average of 0.3 ms over the same period, so this was left as is and explained in the README.
+
+---
+
+## Step 4 — README (2026-11-24)
+
+**What the AI did**
+- `README.md`: architecture diagram, file descriptions, how to run, commands/options (`--reorder` marked as "optional, for demonstration"), demo scenario, TCP vs UDP comparison, how multicast works, Windows/Mac compatibility, troubleshooting, test results summary.
+- `requirements.txt`: `streamlit>=1.37` (because of `st.fragment(run_every=...)`).
+
+**Not yet verified**
+- Development and testing were done on Linux. The Windows/Mac compatibility options are in the code, but running it on actual Windows/Mac is something I need to do myself.
+
+---
+
+## Addendum — English Translation of the Documents (2026-11-26)
+
+**My request**
+- My professor is not Korean, so I asked for the README in English. Then: "make every markdown document in both English and Korean".
+
+**What I decided**
+- English is the main file (`README.md`, `AI_LOG.md`, `CLAUDE.md`), and the original Korean content is kept as `*.ko.md` (`README.ko.md`, `AI_LOG.ko.md`, `CLAUDE.ko.md`). Each file links to the other version at the top.
+
+**What the AI did**
+- Translated the three documents into English. Code blocks, commands, and the `docs/dashboard.png` path were kept unchanged, and the README architecture diagram was realigned to fit the English labels.
+- The README example output was left in Korean, exactly as the program prints it, with an English gloss of the key words (주, 원, 손실, 체결, etc.) above it.
+- Since Claude reads `CLAUDE.md` automatically by its file name, the name was kept and the file was translated into English with its rules unchanged. The "comments in Korean" rule is also unchanged, so code comments stay in Korean.
+- Added a rule to the `CLAUDE.md` workflow: "keep markdown documents in both English and Korean and update them together".

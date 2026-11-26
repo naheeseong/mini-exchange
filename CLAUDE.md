@@ -1,56 +1,60 @@
-# CLAUDE.md — Mini Exchange (TCP/UDP 실시간 주식 거래 시뮬레이터)
+# CLAUDE.md — Mini Exchange (Real-Time Stock Trading Simulator over TCP/UDP)
 
-컴퓨터네트워크 과제. 마감 **2026-11-30**.
-이 파일은 AI(Claude)가 작업할 때 항상 지켜야 할 요구사항과 규칙을 정리한 것이다.
+**English** | [한국어](CLAUDE.ko.md)
 
-## 과제 필수 조건
-1. 백엔드에서 TCP와 UDP를 모두 사용한다.
-2. 실제 애플리케이션에서 프로토콜이 어떻게 동작하는지 보여준다.
-3. Agentic AI를 개발 과정에 활용하고, 그 과정을 `AI_LOG.md`에 기록한다.
-- **금지:** 인터넷 코드 복사/다운로드. 모든 코드는 새로 작성한다.
+Computer Networks course project. Due **2026-11-30**.
+This file lists the requirements and rules that the AI (Claude) must always follow when working on this project.
 
-## 설계 (실제 증권거래소 구조 모방)
-| 채널 | 주소 | 방향 | 용도 | 이유 |
+## Mandatory Assignment Requirements
+1. The backend uses both TCP and UDP.
+2. Demonstrate how the protocols behave in a real application.
+3. Use Agentic AI in the development process and record that process in `AI_LOG.md`.
+- **Forbidden:** copying or downloading code from the internet. All code is written from scratch.
+
+## Design (modeled on a real stock exchange)
+| Channel | Address | Direction | Purpose | Reason |
 |---|---|---|---|---|
-| UDP 멀티캐스트 | 224.1.1.1:5007 | 거래소 → 모든 트레이더 | 시세 | 손실 허용, 1:N, 저지연 |
-| TCP | 127.0.0.1:6000 | 트레이더 ↔ 거래소 | 주문/체결 | 신뢰성, 순서 보장 |
+| UDP multicast | 224.1.1.1:5007 | Exchange → all traders | Market data (quotes) | Loss-tolerant, 1:N, low latency |
+| TCP | 127.0.0.1:6000 | Trader ↔ exchange | Orders / fills | Reliability, ordered delivery |
 
-- 가상 종목 3개: SJU 50,000원, KBK 72,000원, NET 13,500원
-- 랜덤 워크로 0.1초마다 가격 변동
+- Three fictional stocks: SJU 50,000 KRW, KBK 72,000 KRW, NET 13,500 KRW
+- Prices change every 0.1 s by random walk
 
-## 파일 구성
-- `protocol.py` — 공통 설정, JSON 메시지 인코딩/디코딩
-- `exchange_server.py` — 시세 생성 + UDP 멀티캐스트 송신 + TCP 주문 서버(멀티스레드)
-- `trader_client.py` — UDP 시세 수신 + TCP 주문 전송
-- `dashboard.py` — Streamlit 대시보드
-- `README.md`, `AI_LOG.md`, `CLAUDE.md`, `requirements.txt`
+## Files
+- `protocol.py` — shared settings, JSON message encoding/decoding
+- `exchange_server.py` — quote generation + UDP multicast sender + TCP order server (multithreaded)
+- `trader_client.py` — UDP quote receiver + TCP order sender
+- `dashboard.py` — Streamlit dashboard
+- `README.md`, `AI_LOG.md`, `CLAUDE.md` (English) + their Korean versions `README.ko.md`, `AI_LOG.ko.md`, `CLAUDE.ko.md`
+- `requirements.txt`
 
-## 기능 요구사항
-### 1. UDP 시세
-- 메시지마다 `seq` 번호와 송신 시각 `ts`를 붙인다.
-- 클라이언트는 seq의 빈 곳으로 손실률, ts로 지연, seq 역행으로 순서 뒤바뀜을 감지한다.
-- 클라이언트 `--drop` 옵션(예: 0.1)으로 손실을 시뮬레이션한다.
+## Functional Requirements
+### 1. UDP Market Data
+- Every message carries a sequence number `seq` and a send timestamp `ts`.
+- The client detects the loss rate from gaps in `seq`, latency from `ts`, and reordering from `seq` going backwards.
+- The client's `--drop` option (e.g. 0.1) simulates packet loss.
 
-### 2. TCP 주문/체결
-- 서버는 여러 트레이더 동시 접속을 스레드로 처리한다.
-- TCP는 스트림이라 메시지 경계가 없으므로 줄바꿈(`\n`)으로 메시지를 구분한다.
-- 클라이언트에서 `buy SJU 10` / `sell KBK 5` 입력 → 주문 전송 → 현재 시세로 즉시 체결 → `FILL` 응답.
-- 주문~체결 왕복 시간(RTT)을 측정한다.
-- 트레이더별 잔고·보유 주식을 관리한다.
+### 2. TCP Orders / Fills
+- The server handles multiple traders connected at the same time using threads.
+- TCP is a stream with no message boundaries, so messages are delimited by a newline (`\n`).
+- The client types `buy SJU 10` / `sell KBK 5` → the order is sent → filled immediately at the current price → `FILL` reply.
+- Measure the round-trip time (RTT) from order to fill.
+- Manage each trader's cash balance and stock holdings.
 
-### 3. 대시보드 (Streamlit)
-- 실시간 가격 차트, UDP 손실률, 평균 지연, TCP 주문 RTT, 최근 체결 내역
-- TCP와 UDP 통계를 나란히 비교해서 보여준다.
+### 3. Dashboard (Streamlit)
+- Real-time price chart, UDP loss rate, average latency, TCP order RTT, recent fills
+- Show TCP and UDP statistics side by side for comparison.
 
-## 코딩 규칙
-- Python 3.10+. 소켓은 표준 라이브러리 `socket`만 사용 (socket/bind/listen/accept/connect/send/recv).
-- 외부 라이브러리는 대시보드용(Streamlit 등)만 허용.
-- Windows와 Mac 모두에서 동작해야 한다 (멀티캐스트 소켓 옵션 주의).
-- 주석은 한국어로. handshake, 데이터그램, 스트림, 메시지 경계, IGMP 등 네트워크 개념이 **왜** 그렇게 동작하는지 설명한다.
-- 사용자가 직접 설명할 수 있어야 하므로 복잡한 추상화보다 읽기 쉬운 코드를 우선한다.
+## Coding Rules
+- Python 3.10+. Sockets use only the standard library `socket` module (socket/bind/listen/accept/connect/send/recv).
+- External libraries are allowed only for the dashboard (Streamlit, etc.).
+- Must work on both Windows and Mac (be careful with multicast socket options).
+- Code comments are written in Korean. They explain **why** network concepts such as the handshake, datagrams, streams, message boundaries, and IGMP behave the way they do.
+- The user must be able to explain the code themselves, so readable code takes priority over complex abstractions.
 
-## 작업 방식
-- 단계별 진행: (1) UDP 시세 → (2) TCP 주문/체결 → (3) 대시보드 → (4) README
-- 각 단계 끝에 서버 1개 + 클라이언트 2개 이상으로 실제 실행 테스트 → 결과 보고 → **사용자 확인 후** 다음 단계.
-- 각 단계마다 `AI_LOG.md`에 날짜, 사용자 요청, AI가 한 일, 사용자가 결정한 것을 기록한다.
-- 각 단계에서 TCP와 UDP가 어떻게 다르게 동작하는지, 왜 이 부분에 이 프로토콜을 썼는지 쉽게 설명한다.
+## Workflow
+- Proceed step by step: (1) UDP market data → (2) TCP orders/fills → (3) dashboard → (4) README
+- At the end of each step, run a real test with 1 server + 2 or more clients → report the results → move to the next step **only after the user confirms**.
+- For each step, record in `AI_LOG.md` the date, the user's request, what the AI did, and what the user decided.
+- In each step, explain in simple terms how TCP and UDP behave differently and why this protocol was chosen for this part.
+- Markdown documents are kept in two versions, English (`*.md`) and Korean (`*.ko.md`). When one is changed, update the other as well.

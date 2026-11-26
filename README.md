@@ -46,8 +46,8 @@ The terminal and the dashboard show, in concrete numbers, how the two protocols 
 | `dashboard.py` | Streamlit dashboard: price charts, side-by-side UDP/TCP statistics, recent fills |
 | `tests/test_message_boundary.py` | TCP message-boundary experiment (coalesced sends / sending one byte at a time) |
 | `test_logs/` | Logs from actual test runs at each stage |
-| `AI_LOG.md` | Record of the development process with AI (Claude) (in Korean) |
-| `CLAUDE.md` | Requirements and rules given to the AI (in Korean) |
+| `AI_LOG.md` | Record of the development process with AI (Claude) ([Korean](AI_LOG.ko.md)) |
+| `CLAUDE.md` | Requirements and rules given to the AI ([Korean](CLAUDE.ko.md)) |
 
 ## How to Run
 

@@ -46,8 +46,8 @@
 | `dashboard.py` | Streamlit 대시보드: 가격 차트, UDP/TCP 통계 비교, 최근 체결 |
 | `tests/test_message_boundary.py` | TCP 메시지 경계 실험 (붙여 보내기 / 1바이트씩 쪼개 보내기) |
 | `test_logs/` | 단계별 실제 실행 로그 |
-| `AI_LOG.md` | AI(Claude)와 함께 개발한 과정 기록 |
-| `CLAUDE.md` | AI 에게 준 요구사항·규칙 정리 |
+| `AI_LOG.ko.md` | AI(Claude)와 함께 개발한 과정 기록 ([영어](AI_LOG.md)) |
+| `CLAUDE.ko.md` | AI 에게 준 요구사항·규칙 정리 ([영어](CLAUDE.md)) |
 
 ## 실행 방법
 
@@ -149,4 +149,4 @@ quit            종료 (최종 통계 출력)
 | 2. TCP 주문 | 서버 + 거래 클라이언트 3 + 관찰 1 + 경계 실험 | 동시 주문 70건 이상 전부 체결, carol 60건 연속 주문 RTT 평균 0.09ms, 잔고/보유 부족 거부 정상, 붙여 보내기·쪼개 보내기 모두 정상 |
 | 3. 대시보드 | 서버 + 트레이더 2 + 대시보드 (슬라이더 0.2) | UDP 손실률 10~16% 표시, TCP 요청 22건 손실 0, RTT 평균 0.74ms, 전체 체결 내역 표시 |
 
-자세한 로그는 `test_logs/`, 개발 과정은 `AI_LOG.md` 참고.
+자세한 로그는 `test_logs/`, 개발 과정은 `AI_LOG.ko.md` 참고.
