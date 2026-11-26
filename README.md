@@ -1,86 +1,88 @@
-# Mini Exchange — TCP/UDP 실시간 주식 거래 시뮬레이터
+# Mini Exchange — A Real-Time Stock Trading Simulator over TCP/UDP
 
-컴퓨터네트워크 과제. 실제 증권거래소처럼 **시세는 UDP 멀티캐스트**로 모든 트레이더에게 뿌리고,
-**주문/체결은 TCP**로 주고받는 작은 거래소를 Python 표준 `socket`만으로 만들었다.
-두 프로토콜이 실제 애플리케이션에서 어떻게 다르게 동작하는지 터미널과 대시보드에서 숫자로 확인할 수 있다.
+**English** | [한국어](README.ko.md)
 
-![대시보드](docs/dashboard.png)
+A Computer Networks course project. Like a real stock exchange, this small exchange **broadcasts market data to every trader over UDP multicast**
+and **exchanges orders and fills over TCP**. It is built using only Python's standard `socket` module.
+The terminal and the dashboard show, in concrete numbers, how the two protocols behave differently in a real application.
 
-## 구조
+![Dashboard](docs/dashboard.png)
+
+## Architecture
 
 ```
-                         ┌──────────────────────────────┐
-                         │      exchange_server.py      │
-                         │                              │
-                         │  [시세 스레드] 0.1초마다       │
-                         │   랜덤 워크로 가격 변경        │
-                         │        │                     │
-                         │        ▼ sendto (1번)        │
-                         │  UDP 224.1.1.1:5007 ─────────┼──┐ 멀티캐스트 (1:N)
-                         │                              │  │ 손실 허용 · 저지연
-                         │  [메인 스레드] accept()       │  │
-                         │  TCP 127.0.0.1:6000          │  │
-                         │   ├─ [트레이더 스레드] alice  ◀┼──┼──┐ TCP 연결 (1:1)
-                         │   ├─ [트레이더 스레드] bob    ◀┼──┼──┤ 신뢰성 · 순서 보장
-                         │   └─ [트레이더 스레드] dashboard◀┼─┼─┤
-                         └──────────────────────────────┘  │  │
-                                                           ▼  ▼
-          trader_client.py (alice)   trader_client.py (bob)   dashboard.py
-          UDP 시세 수신 + TCP 주문     UDP 시세 수신 + TCP 주문    UDP + TCP 통계 시각화
+                         ┌───────────────────────────────────┐
+                         │         exchange_server.py        │
+                         │                                   │
+                         │  [Market-data thread] every 0.1 s │
+                         │   prices change by random walk    │
+                         │        │                          │
+                         │        ▼ sendto (once)            │
+                         │  UDP 224.1.1.1:5007 ──────────────┼──┐ Multicast (1:N)
+                         │                                   │  │ loss-tolerant · low latency
+                         │  [Main thread] accept()           │  │
+                         │  TCP 127.0.0.1:6000               │  │
+                         │   ├─ [Trader thread] alice      ◀─┼──┼──┐ TCP connections (1:1)
+                         │   ├─ [Trader thread] bob        ◀─┼──┼──┤ reliable · in-order
+                         │   └─ [Trader thread] dashboard  ◀─┼──┼──┤
+                         └───────────────────────────────────┘  │  │
+                                                                ▼  ▼
+   trader_client.py (alice)        trader_client.py (bob)        dashboard.py
+   UDP quotes in + TCP orders      UDP quotes in + TCP orders    visualizes UDP + TCP stats
 ```
 
-| 채널 | 주소 | 방향 | 용도 | 이 프로토콜을 쓴 이유 |
+| Channel | Address | Direction | Purpose | Why this protocol |
 |---|---|---|---|---|
-| UDP 멀티캐스트 | 224.1.1.1:5007 | 거래소 → 모든 트레이더 | 시세 | 시세는 0.1초마다 새로 온다. 하나 놓쳐도 곧 다음 값이 오므로 재전송을 기다리는 것보다 빨리 받는 게 중요하다. 한 번 보내면 그룹 전체가 받는다. |
-| TCP | 127.0.0.1:6000 | 트레이더 ↔ 거래소 | 주문/체결 | 주문이 사라지거나 순서가 바뀌면 돈이 틀어진다. TCP 는 OS 가 ACK·재전송·순서 정렬을 해준다. |
+| UDP multicast | 224.1.1.1:5007 | Exchange → all traders | Market data (quotes) | A new quote arrives every 0.1 s. If one is lost, the next one comes shortly, so receiving quickly matters more than waiting for a retransmission. A single send reaches the whole group. |
+| TCP | 127.0.0.1:6000 | Trader ↔ exchange | Orders / fills | If an order is lost or reordered, the money goes wrong. With TCP, the OS handles ACKs, retransmission, and reordering. |
 
-## 파일
+## Files
 
-| 파일 | 내용 |
+| File | Contents |
 |---|---|
-| `protocol.py` | 공통 설정(주소·포트·종목), JSON 인코딩/디코딩, TCP 줄바꿈 구분(`LineReader`) |
-| `exchange_server.py` | 시세 생성 + UDP 멀티캐스트 송신 + 멀티스레드 TCP 주문 서버, 계좌 관리 |
-| `trader_client.py` | UDP 시세 수신(손실률·지연·역순 측정) + TCP 주문 전송(RTT 측정) |
-| `dashboard.py` | Streamlit 대시보드: 가격 차트, UDP/TCP 통계 비교, 최근 체결 |
-| `tests/test_message_boundary.py` | TCP 메시지 경계 실험 (붙여 보내기 / 1바이트씩 쪼개 보내기) |
-| `test_logs/` | 단계별 실제 실행 로그 |
-| `AI_LOG.md` | AI(Claude)와 함께 개발한 과정 기록 |
-| `CLAUDE.md` | AI 에게 준 요구사항·규칙 정리 |
+| `protocol.py` | Shared settings (addresses, ports, symbols), JSON encoding/decoding, newline framing for TCP (`LineReader`) |
+| `exchange_server.py` | Quote generation + UDP multicast sender + multithreaded TCP order server, account management |
+| `trader_client.py` | UDP quote receiver (measures loss rate, latency, reordering) + TCP order sender (measures RTT) |
+| `dashboard.py` | Streamlit dashboard: price charts, side-by-side UDP/TCP statistics, recent fills |
+| `tests/test_message_boundary.py` | TCP message-boundary experiment (coalesced sends / sending one byte at a time) |
+| `test_logs/` | Logs from actual test runs at each stage |
+| `AI_LOG.md` | Record of the development process with AI (Claude) (in Korean) |
+| `CLAUDE.md` | Requirements and rules given to the AI (in Korean) |
 
-## 실행 방법
+## How to Run
 
-Python 3.10 이상. 서버와 트레이더는 **표준 라이브러리만** 쓰므로 설치할 것이 없다. 대시보드만 Streamlit 이 필요하다.
+Python 3.10 or later. The server and traders use **only the standard library**, so nothing needs to be installed. Only the dashboard requires Streamlit.
 
 ```bash
-pip install -r requirements.txt      # 대시보드를 쓸 때만
+pip install -r requirements.txt      # only needed for the dashboard
 ```
 
-터미널을 여러 개 열어서 실행한다. (Windows 는 `python`, Mac 은 `python3` 일 수 있다)
+Open several terminals and run the following. (The command may be `python` on Windows and `python3` on Mac.)
 
 ```bash
-# 1) 거래소 서버
+# 1) Exchange server
 python exchange_server.py
 
-# 2) 트레이더 (터미널마다 하나씩, 2개 이상)
+# 2) Traders (one per terminal, two or more)
 python trader_client.py --name alice
-python trader_client.py --name bob --drop 0.1        # 받은 시세의 10%를 일부러 버림
+python trader_client.py --name bob --drop 0.1        # deliberately drops 10% of received quotes
 
-# 3) 대시보드 (브라우저가 열림, http://localhost:8501)
+# 3) Dashboard (opens in the browser at http://localhost:8501)
 streamlit run dashboard.py
 ```
 
-### 트레이더 명령어
+### Trader Commands
 
 ```
-buy SJU 10      SJU 10주 매수 → TCP 로 주문 → 현재 시세로 즉시 체결 → FILL 응답 + RTT 출력
-sell KBK 5      KBK 5주 매도
-balance         잔고 조회
-price           최근 시세 + UDP 통계
-stats           UDP 통계와 TCP RTT 통계 비교
-quit            종료 (최종 통계 출력)
+buy SJU 10      Buy 10 shares of SJU → order sent over TCP → filled immediately at the current price → FILL reply + RTT shown
+sell KBK 5      Sell 5 shares of KBK
+balance         Show cash and holdings
+price           Latest quotes + UDP statistics
+stats           Compare UDP statistics with TCP RTT statistics
+quit            Exit (prints final statistics)
 ```
 
-예시 출력:
+Example output (the program's messages are in Korean; 주 = shares, 원 = KRW, 현금 = cash, 보유 = holdings, 수신 = received, 손실 = lost, 역순 = out of order, 지연 = latency, 평균/최소/최대 = avg/min/max, 체결 = filled, 거부 = rejected, 현금 부족 = insufficient cash):
 
 ```
 [alice] FILL #1 BUY SJU 10주 @ 49,720원 (내가 본 시세 49,720) RTT 0.44ms | 현금 9,502,800원 | 보유 SJU 10주
@@ -89,62 +91,62 @@ quit            종료 (최종 통계 출력)
 [bob] TCP 주문 : 주문 40건 (체결 40, 거부 0, 손실 0)  RTT 평균 0.67ms / 최소 0.10ms / 최대 4.28ms
 ```
 
-### 트레이더 옵션
+### Trader Options
 
-| 옵션 | 설명 |
+| Option | Description |
 |---|---|
-| `--name alice` | 트레이더 이름. 같은 이름으로 다시 접속하면 계좌가 이어진다. 처음엔 현금 1,000만 원. |
-| `--drop 0.1` | 받은 시세 패킷을 10% 확률로 버린다 (네트워크 손실 흉내). TCP 주문에는 영향 없음. |
-| `--reorder 0.05` | **[선택, 시연용]** 5% 확률로 패킷 하나를 붙잡아 두었다가 다음 패킷 뒤에 처리한다. 같은 컴퓨터 안에서는 순서가 거의 안 바뀌어서 "순서 뒤바뀜 감지" 기능을 보여주기 위해 넣은 옵션. |
-| `--watch` | 시세 관찰 모드. TCP 주문 없이 1초마다 시세와 UDP 통계만 출력한다. |
-| `--duration 10` | `--watch` 모드에서 10초 후 자동 종료 (테스트용). |
-| `--iface 127.0.0.1` | 멀티캐스트에 쓸 네트워크 인터페이스 (아래 문제 해결 참고). |
+| `--name alice` | Trader name. Reconnecting with the same name resumes the same account. New accounts start with 10,000,000 KRW in cash. |
+| `--drop 0.1` | Drops received quote packets with 10% probability (simulates network loss). Has no effect on TCP orders. |
+| `--reorder 0.05` | **[Optional, for demonstration]** With 5% probability, holds one packet back and processes it after the next one. On a single machine packets are almost never reordered, so this option exists to demonstrate the out-of-order detection feature. |
+| `--watch` | Watch mode. Prints quotes and UDP statistics once per second, without sending any TCP orders. |
+| `--duration 10` | In `--watch` mode, exits automatically after 10 seconds (for testing). |
+| `--iface 127.0.0.1` | Network interface used for multicast (see Troubleshooting below). |
 
-### 시연 시나리오
+### Demo Scenario
 
-1. 서버 + `alice` + `bob --drop 0.2` + 대시보드를 켠다.
-2. alice 와 bob 에서 `buy`/`sell` 을 입력한다 → 서버 화면에 두 트레이더의 체결이 섞여서 찍힌다 (스레드로 동시 처리).
-3. 둘 다 `stats` → **bob 의 UDP 손실률은 약 20%인데, TCP 주문은 하나도 빠지지 않는다.**
-4. 대시보드 사이드바의 슬라이더로 손실 확률을 올리면 "최근 10초 손실률"이 따라 오른다. 그래도 TCP 요청 손실은 0 이다.
-5. 서버를 끄고 트레이더에서 주문 → TCP 는 바로 연결 끊김을 알아챈다. 반면 서버가 꺼져 있어도 UDP 수신자는 그냥 조용히 기다린다 (연결이란 개념이 없으므로).
-6. `python tests/test_message_boundary.py` → 두 주문을 한 번에 붙여 보내도, 한 주문을 1바이트씩 쪼개 보내도 서버가 정확히 메시지를 나눠 처리하는 것을 확인한다.
+1. Start the server, `alice`, `bob --drop 0.2`, and the dashboard.
+2. Enter `buy`/`sell` in both alice and bob → the server output shows fills from both traders interleaved (handled concurrently by threads).
+3. Run `stats` in both → **bob's UDP loss rate is about 20%, yet not a single TCP order is lost.**
+4. Raise the loss probability with the slider in the dashboard sidebar, and the "loss rate over the last 10 seconds" rises accordingly. TCP request loss still stays at 0.
+5. Stop the server and place an order from a trader → TCP notices the broken connection immediately. In contrast, a UDP receiver just waits silently even when the server is down (because UDP has no notion of a connection).
+6. Run `python tests/test_message_boundary.py` → confirm that the server splits messages correctly, whether two orders are sent coalesced in one write or a single order is sent one byte at a time.
 
-## TCP 와 UDP 가 이 프로그램에서 어떻게 다르게 동작하나
+## How TCP and UDP Behave Differently in This Program
 
-| | UDP 시세 | TCP 주문 |
+| | UDP quotes | TCP orders |
 |---|---|---|
-| 연결 | 없음. `sendto` 로 바로 보낸다. 받는 사람이 없어도 에러가 안 난다. | `connect` 때 3-way handshake(SYN → SYN+ACK → ACK). 서버가 꺼져 있으면 바로 `ConnectionRefusedError`. |
-| 전달 보장 | 없음. 사라진 패킷은 영원히 사라진다. 서버는 모른다. | OS 가 ACK 를 받을 때까지 재전송한다. 응용 프로그램이 보는 손실은 0. |
-| 순서 | 보장 안 함 → 우리가 `seq` 번호를 붙여서 빈 번호는 손실, 작은 번호가 늦게 오면 역순으로 판단. | OS 가 TCP 순서 번호로 정렬해서 보낸 순서대로 넘겨준다. |
-| 메시지 경계 | 있음. `sendto` 1번 = `recvfrom` 1번 = 메시지 1개. | 없음(바이트 스트림). 메시지가 붙거나 쪼개져서 올 수 있다 → 끝에 `\n` 을 붙이고 `LineReader` 가 `\n` 까지 모아서 자른다. |
-| 대상 | 1:N. 멀티캐스트 그룹(IGMP 가입)에 한 번 보내면 가입자 전원이 받는다. | 1:1. 트레이더마다 연결(소켓) 하나, 서버 스레드 하나. |
-| 측정한 지연 | 편도 지연 = 받은 시각 − 서버가 붙인 `ts`. (같은 컴퓨터라 시계가 같을 때만 정확) | RTT = 주문 보낸 순간 ~ FILL 받은 순간. 내 시계 하나로 재므로 서버와 시계가 달라도 정확. |
+| Connection | None. Data is sent directly with `sendto`. No error occurs even if nobody is listening. | `connect` performs the 3-way handshake (SYN → SYN+ACK → ACK). If the server is down, `ConnectionRefusedError` is raised immediately. |
+| Delivery guarantee | None. A lost packet is gone for good, and the server never knows. | The OS retransmits until it receives an ACK. The loss seen by the application is 0. |
+| Ordering | Not guaranteed → we attach a `seq` number: a missing number means loss, and a smaller number arriving late means reordering. | The OS reorders segments using TCP sequence numbers and delivers data in the order it was sent. |
+| Message boundaries | Preserved. One `sendto` = one `recvfrom` = one message. | None (byte stream). Messages may be merged or split in transit → we append `\n` to each message, and `LineReader` buffers data until `\n` and splits there. |
+| Recipients | 1:N. One send to the multicast group (joined via IGMP) reaches every member. | 1:1. One connection (socket) and one server thread per trader. |
+| Latency measured | One-way latency = receive time − `ts` stamped by the server. (Accurate only when both share the same clock, i.e. the same machine.) | RTT = from sending the order to receiving the FILL. Measured with a single local clock, so it is accurate even if the server's clock differs. |
 
-### 멀티캐스트 동작 원리 (요약)
-- 224.0.0.0 ~ 239.255.255.255 는 특정 컴퓨터가 아니라 **그룹**을 가리키는 주소다.
-- 수신자가 `IP_ADD_MEMBERSHIP` 을 하면 OS 가 **IGMP Membership Report** 를 보내 "이 그룹 패킷을 받고 싶다"고 알린다. 가입하지 않으면 bind 만 해서는 패킷이 오지 않는다.
-- 송신자는 `IP_MULTICAST_TTL=1` 로 LAN 밖으로 나가지 않게 하고, `IP_MULTICAST_LOOP=1` 로 같은 컴퓨터의 수신자도 받게 한다.
+### How Multicast Works (Summary)
+- Addresses 224.0.0.0 – 239.255.255.255 refer not to a specific host but to a **group**.
+- When a receiver calls `IP_ADD_MEMBERSHIP`, the OS sends an **IGMP Membership Report** announcing "I want to receive packets for this group". Without joining, merely binding the socket does not deliver any packets.
+- The sender sets `IP_MULTICAST_TTL=1` so that packets do not leave the LAN, and `IP_MULTICAST_LOOP=1` so that receivers on the same machine also get them.
 
-## Windows / Mac 호환을 위해 한 처리
+## Windows / Mac Compatibility
 
-- 수신 소켓은 멀티캐스트 주소가 아니라 `""`(모든 주소)로 bind 한다. Windows 는 멀티캐스트 주소로 bind 할 수 없다.
-- 한 컴퓨터에서 여러 트레이더가 같은 포트 5007 을 쓰도록 `SO_REUSEADDR` 를 켜고, 있으면 `SO_REUSEPORT` 도 켠다 (Mac 은 필요, Windows 엔 없음).
-- `accept`/`recvfrom` 에 1초 timeout 을 걸어서 Windows 에서도 Ctrl+C 로 종료된다.
+- The receiving socket binds to `""` (all addresses) rather than to the multicast address, because Windows cannot bind to a multicast address.
+- To let several traders on one machine share port 5007, `SO_REUSEADDR` is enabled, and `SO_REUSEPORT` is enabled too where available (required on Mac, absent on Windows).
+- `accept`/`recvfrom` use a 1-second timeout so that Ctrl+C also terminates the program on Windows.
 
-## 문제 해결
+## Troubleshooting
 
-- **트레이더가 시세를 하나도 못 받을 때 (특히 Mac, 와이파이 꺼짐/VPN)**: 서버와 트레이더 모두 `--iface 127.0.0.1` 을 붙여 실행한다.
-  대시보드까지 한 번에 바꾸려면 `protocol.py` 의 `MCAST_IFACE = "127.0.0.1"` 로 수정한다.
-- **Windows 방화벽 창이 뜰 때**: "개인 네트워크" 허용을 누른다. 막으면 멀티캐스트가 안 들어온다.
-- **`Address already in use`**: 이전 서버가 아직 떠 있는지 확인한다. (TCP 서버는 `SO_REUSEADDR` 를 켜서 재시작은 바로 된다)
-- **대시보드의 UDP 지연 그래프에 가끔 50~100ms 튀는 값**: 네트워크 문제가 아니라, Streamlit 이 화면을 그리는 동안 Python 의 GIL 때문에 수신 스레드가 잠깐 멈춰서 생기는 처리 지연이다. 같은 시간 터미널 트레이더의 지연은 평균 0.3ms 정도로 안정적이다.
+- **A trader receives no quotes at all (especially on Mac, with Wi-Fi off or a VPN on)**: run both the server and the traders with `--iface 127.0.0.1`.
+  To change it for the dashboard as well in one place, set `MCAST_IFACE = "127.0.0.1"` in `protocol.py`.
+- **A Windows Firewall prompt appears**: allow access on "Private networks". If it is blocked, multicast packets will not arrive.
+- **`Address already in use`**: check whether a previous server is still running. (The TCP server enables `SO_REUSEADDR`, so it can be restarted right away.)
+- **Occasional 50–100 ms spikes in the dashboard's UDP latency chart**: this is not a network problem. It is a processing delay caused by Python's GIL briefly pausing the receiver thread while Streamlit renders the page. Over the same period, the terminal traders' latency stays stable at around 0.3 ms on average.
 
-## 테스트 결과 요약 (같은 컴퓨터, 서버 1 + 클라이언트 여러 개)
+## Test Results Summary (single machine, 1 server + multiple clients)
 
-| 단계 | 구성 | 결과 |
+| Stage | Setup | Result |
 |---|---|---|
-| 1. UDP 시세 | 서버 + 클라이언트 3 (기본 / `--drop 0.1` / `--reorder 0.05`) 10초 | 기본 손실 0%, 지연 0.34ms · drop 손실 15% · reorder 역순 3건 감지 |
-| 2. TCP 주문 | 서버 + 거래 클라이언트 3 + 관찰 1 + 경계 실험 | 동시 주문 70건 이상 전부 체결, carol 60건 연속 주문 RTT 평균 0.09ms, 잔고/보유 부족 거부 정상, 붙여 보내기·쪼개 보내기 모두 정상 |
-| 3. 대시보드 | 서버 + 트레이더 2 + 대시보드 (슬라이더 0.2) | UDP 손실률 10~16% 표시, TCP 요청 22건 손실 0, RTT 평균 0.74ms, 전체 체결 내역 표시 |
+| 1. UDP quotes | Server + 3 clients (default / `--drop 0.1` / `--reorder 0.05`), 10 s | Default: 0% loss, 0.34 ms latency · drop: 15% loss · reorder: 3 out-of-order packets detected |
+| 2. TCP orders | Server + 3 trading clients + 1 watcher + boundary experiment | 70+ concurrent orders all filled, carol's 60 back-to-back orders averaged 0.09 ms RTT, insufficient cash/holdings correctly rejected, both coalesced and split sends handled correctly |
+| 3. Dashboard | Server + 2 traders + dashboard (slider at 0.2) | UDP loss rate shown at 10–16%, 22 TCP requests with 0 lost, 0.74 ms average RTT, full fill history displayed |
 
-자세한 로그는 `test_logs/`, 개발 과정은 `AI_LOG.md` 참고.
+See `test_logs/` for detailed logs and `AI_LOG.md` for the development process.
